@@ -308,9 +308,65 @@ def run_one_epoch_inverse2(mode, loader, forward_func, ofc_args, inverse_model, 
         # Forward pass through the function forward_func
         with torch.no_grad():
             intermediate_outputs = forward_func(inverse_outputs, ofc_args)
-        
         forward_outputs = intermediate_outputs.clone().detach().requires_grad_(True).to(device)
+
         forward_outputs = forward_outputs - torch.mean(forward_outputs) * loader.dataset.zero_mean
+        forward_outputs = loader.dataset.normalize(forward_outputs)
+
+        plt.figure()
+        plt.plot(inputs.squeeze().cpu().detach(), "s--", label='Input')
+        plt.figure()
+        plt.plot(inverse_outputs.squeeze().cpu().detach(), "o-", label='Inverse Outputs')
+
+        plt.figure()
+        plt.plot(targets.squeeze().cpu().detach(), "s--", label='Target')
+        plt.plot(forward_outputs.squeeze().cpu().detach(), "o-", label='Forward Outputs')
+
+
+ 
+        # Calculate loss
+        loss = loss_fn(forward_outputs, targets)
+
+        total_loss += loss.item()
+
+        if mode == 'train':
+            optimizer.zero_grad()  # Reset gradients tensors
+            loss.backward()  # Calculate gradients
+            optimizer.step()  # Update weights
+
+        n_loops += 1
+
+    avg_loss = total_loss / n_loops
+
+    # Return outputs for analysis if needed
+    return avg_loss, forward_outputs, inverse_outputs, targets, inputs
+
+def run_one_epoch_inverse3(mode, loader, forward_func, ofc_args, inverse_model, loss_fn, device="cpu", optimizer=None):
+    if mode == 'train':
+        inverse_model.train()
+    elif mode == 'val' or mode == "test":
+        inverse_model.eval()
+    else:
+        raise ValueError("Invalid mode. Try to use 'train', 'val' or 'test'.")
+
+    total_loss = 0.0
+    n_loops = 0
+    
+    for inputs, targets in loader:
+        inputs = inputs.to(device)
+        targets = targets.to(device)
+        
+        inverse_outputs = inverse_model(targets)  # Forward pass through the inverse model
+
+        # Perform some operation in the inverse_outputs:
+        forward_outputs = forward_func(inverse_outputs, ofc_args)  # Ensure this function preserves gradients
+
+        # Ensure forward_outputs is on the correct device
+        forward_outputs = forward_outputs.to(device)
+
+        # Optionally zero-mean and normalize forward_outputs
+        if loader.dataset.zero_mean:
+            forward_outputs = forward_outputs - torch.mean(forward_outputs, dim=-1, keepdim=True)
         forward_outputs = loader.dataset.normalize(forward_outputs)
 
         # Calculate loss
@@ -328,7 +384,6 @@ def run_one_epoch_inverse2(mode, loader, forward_func, ofc_args, inverse_model, 
 
     # Return outputs for analysis if needed
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
-
 
 class FrequencyCombNet(nn.Module):
     def __init__(self, architecture):
@@ -359,8 +414,8 @@ class FrequencyCombDataset(Dataset):
         self.output_tensors = self.make_outputs(self.input_tensors, self.function, self.device, self.zero_mean)
 
         if norm_scales == None:
-            min = torch.ceil(torch.min(torch.abs(self.output_tensors))).item()
-            max = torch.ceil(torch.max(torch.abs(self.output_tensors))).item()
+            min = torch.ceil(torch.min(self.output_tensors)).item()
+            max = torch.ceil(torch.max(self.output_tensors)).item()
             self.norm_scales = [min, max]
         self.output_tensors = self.normalize(self.output_tensors)
     
@@ -372,9 +427,9 @@ class FrequencyCombDataset(Dataset):
     def make_outputs(self, inputs, function, device = "cpu", zero_mean = True):
         outputs = []
         for input in inputs:
-            freq_peaks = function(input.view(1,-1), self.ofc_args)
-            freq_peaks = freq_peaks - torch.mean(freq_peaks)*zero_mean
-            outputs.append(freq_peaks)
+            peaks = function(input.view(1,-1), self.ofc_args)
+            peaks = peaks - torch.mean(peaks)*zero_mean
+            outputs.append(peaks)
         outputs = torch.stack(outputs, dim=0).to(device)
         return outputs
 
