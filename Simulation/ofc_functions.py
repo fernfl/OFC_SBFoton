@@ -543,11 +543,9 @@ def create_flatCombs_numpy(nsamples, args, bounds, upper_min_max = 5.0, n_max = 
         best_params, peaks, min_max = optimization_flatComb_numpy(input, args, bounds, n_max, method)
         if min_max < 1:
             flatComb_inputs0_1dB.append(best_params)
-            peaks = peaks - np.mean(peaks)
             flatComb_outputs0_1dB.append(peaks)
         elif min_max < upper_min_max:
             flatComb_inputs1_ndB.append(best_params)
-            peaks = peaks - np.mean(peaks)
             flatComb_outputs1_ndB.append(peaks)
 
     return flatComb_inputs0_1dB, flatComb_outputs0_1dB, flatComb_inputs1_ndB, flatComb_outputs1_ndB

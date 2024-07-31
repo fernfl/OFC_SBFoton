@@ -6,50 +6,6 @@ from torch import nn
 from torch.utils.data import Dataset
 import torch.distributions.uniform as urand
 
-def split_train_val_test_data(inputs, outputs, train_ratio = 0.8, val_ratio = 0.1, test_ratio = 0.1, shuffle = False):
-
-    '''
-    Function to split the data into training, validation and test datasets
-
-    Parameters:
-    inputs: array_like
-        Inputs of the data
-    outputs: array_like
-        Outputs of the data
-    train_ratio: float
-        Ratio of the training data
-    val_ratio: float
-        Ratio of the validation data
-    test_ratio: float
-        Ratio of the test data
-    shuffle: bool
-        Shuffle the data before splitting
-    '''
-
-    if train_ratio + val_ratio + test_ratio > 1:
-        raise ValueError("The sum of the ratios must be less than or equal to 1.")
-
-    len_data = len(inputs)
-    train_idx = int((train_ratio)*len_data)
-    val_idx   = int((train_ratio + val_ratio)*len_data)
-    test_idx  = int((train_ratio + val_ratio + test_ratio)*len_data)
-
-    train_idxs = np.arange(0, train_idx)
-    val_idxs = np.arange(train_idx, val_idx)
-    test_idxs = np.arange(val_idx, test_idx)
-
-    if shuffle:
-        idx = np.random.permutation(len(inputs))
-        inputs = inputs[idx]
-        outputs = outputs[idx]
-
-    # train, validation and test data
-    train_in, train_out = inputs[train_idxs], outputs[train_idxs]
-    val_in, val_out  = inputs[val_idxs], outputs[val_idxs]
-    test_in, test_out = inputs[test_idxs], outputs[test_idxs]
-
-    return train_in, train_out, val_in, val_out, test_in, test_out
-
 
 def convert_to_real_loss(loss, norm_scales):
     '''
@@ -312,7 +268,6 @@ def run_one_epoch_forward(mode, loader, model, loss_fn, device="cpu", optimizer=
     total_loss = 0.0
     n_loops = 0
     for inputs, targets in loader:
-        inputs, targets = inputs.to(device), targets.to(device)
 
         outputs = model(inputs) # Calculate outputs
         loss = loss_fn(outputs, targets) # Calculate loss
@@ -372,8 +327,6 @@ def run_one_epoch_inverse(mode, loader, forward_model, inverse_model, loss_fn, d
     total_loss = 0.0
     n_loops = 0
     for inputs, targets in loader:
-        inputs = inputs.to(device)
-        targets = targets.to(device)
         
         inverse_outputs = inverse_model(targets) # Forward pass through the inverse model
         forward_outputs = forward_model(inverse_outputs) # Forward pass through the forward model
@@ -440,9 +393,7 @@ def run_one_epoch_inverse_PINN(mode, loader, forward_func, ofc_args, inverse_mod
     n_loops = 0
     
     for inputs, targets in loader:
-        inputs = inputs.to(device)
-        targets = targets.to(device)
-        
+
         inverse_outputs = inverse_model(targets)  # Forward pass through the inverse model
 
         # Perform some operation in the inverse_outputs:
@@ -467,6 +418,19 @@ def run_one_epoch_inverse_PINN(mode, loader, forward_func, ofc_args, inverse_mod
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
 
 class FrequencyCombNet(nn.Module):
+
+    '''
+    Neural network model class
+
+    Parameters:
+    architecture: list
+        Architecture of the neural network model
+
+    Methods:
+    forward(self, x)
+        Forward pass of the neural network model
+    '''
+    
     def __init__(self, architecture):
         self.architecture = architecture
         super(FrequencyCombNet, self).__init__()
@@ -479,6 +443,7 @@ class FrequencyCombNet(nn.Module):
     def forward(self, x):
         return self.layers(x)
     
+import copy
 
 # Define your custom dataset
 class FrequencyCombDataset(Dataset):
@@ -520,36 +485,163 @@ class FrequencyCombDataset(Dataset):
     __getitem__(self, idx)
         Get the input and output of the dataset in the index idx
     '''
-    def __init__(self, function, nsamples, ofc_args, bounds, device = "cpu", norm_scales = None, zero_mean = True, creation_batch_size = 1000):
-        self.function = function
-        self.nsamples = nsamples
-        self.ofc_args = ofc_args
-        self.bounds = bounds
+    def __init__(self, *args, device = "cpu", norm_scales = None, norm = True, zero_mean = True, creation_batch_size = 1000):
+        
         self.device = device
         self.norm_scales = norm_scales
+        self.norm = norm
         self.zero_mean = zero_mean
         
-        # Generate inputs
-        self.input_tensors = self.make_inputs()
+        # First way to create the dataset: using the function, nsamples, ofc_args and bounds
+        if len(args) == 4:
+            function, nsamples, ofc_args, bounds = args
+            
+            self.function = function
+            self.nsamples = nsamples
+            self.ofc_args = ofc_args
+            self.bounds = bounds
 
-        # Generate outputs using batch processing
-        self.output_tensors = self.make_outputs(creation_batch_size)
+            # Generate inputs
+            self.input_tensors = self.make_inputs().to(self.device)
+
+            # Generate outputs using batch processing
+            self.output_tensors = self.make_outputs(creation_batch_size).to(self.device)
+
+        # Second way to create the dataset: using the inputs and outputs already generated
+        elif len(args) == 2:
+            inputs, outputs = args
+
+            if not torch.is_tensor(inputs):
+                inputs = torch.as_tensor(inputs, dtype=torch.float32)
+            if not torch.is_tensor(outputs):
+                outputs = torch.as_tensor(outputs, dtype=torch.float32)
+
+            self.input_tensors = inputs.to(self.device)
+            self.output_tensors = outputs.to(self.device)
+
+        else:
+            raise ValueError("Invalid number of arguments. Try to use 2 (inputs and outputs) or 4 (function, nsamples, ofc_args, bounds).")
+        
+        # Zero mean the data
         if zero_mean:
             self.output_tensors -= torch.mean(self.output_tensors, dim=1).unsqueeze(1)
 
-        # Normalize the data
+        # Calculate the normalization scales
         if norm_scales == None:
-            min = torch.ceil(torch.min(self.output_tensors)).item()
-            max = torch.ceil(torch.max(self.output_tensors)).item()
-            self.norm_scales = [min, max]
-        self.output_tensors = self.normalize(self.output_tensors)
+            self.calc_norm_scales()
+        
+        # Normalize the data
+        if norm:
+            self.output_tensors = self.normalize(self.output_tensors)
+
+    def calc_norm_scales(self):
+        min = torch.ceil(torch.min(self.output_tensors)).item()
+        max = torch.ceil(torch.max(self.output_tensors)).item()
+        self.norm_scales = [min, max]
+
+    def split_train_val_test(self, train_ratio = 0.8, val_ratio = 0.1, test_ratio = 0.1, shuffle = True):
+        '''
+        This function returns three FrequencyCombDataset objects: train, validation and test datasets
+        '''
+        if train_ratio + val_ratio + test_ratio > 1:
+            raise ValueError("The sum of the ratios must be less than or equal to 1.")
+
+        len_data = self.__len__()
+        train_idx = int((train_ratio)*len_data)
+        val_idx   = int((train_ratio + val_ratio)*len_data)
+        test_idx  = int((train_ratio + val_ratio + test_ratio)*len_data)
+
+        train_idxs = torch.arange(0, train_idx)
+        val_idxs = torch.arange(train_idx, val_idx)
+        test_idxs = torch.arange(val_idx, test_idx)
+
+        idx_shuffle = torch.arange(len_data)
+        if shuffle:
+            idx_shuffle = torch.randperm(len_data)
+
+        # train, validation and test data
+        train_in, train_out = self.input_tensors[idx_shuffle][train_idxs], self.output_tensors[idx_shuffle][train_idxs]
+        val_in, val_out     = self.input_tensors[idx_shuffle][val_idxs],   self.output_tensors[idx_shuffle][val_idxs]
+        test_in, test_out   = self.input_tensors[idx_shuffle][test_idxs],  self.output_tensors[idx_shuffle][test_idxs]
+
+        '''
+        #using deepcopy to avoid changing the original dataset
+        train_dataset = copy.deepcopy(self)
+        train_dataset.input_tensors, train_dataset.output_tensors = None, None
+        val_dataset   = copy.deepcopy(train_dataset)
+        test_dataset  = copy.deepcopy(train_dataset)
+
+        train_dataset.input_tensors, train_dataset.output_tensors = train_in, train_out
+        val_dataset.input_tensors, val_dataset.output_tensors = val_in, val_out
+        test_dataset.input_tensors, test_dataset.output_tensors = test_in, test_out
+        #'''
+
+        # Create the datasets
+
+        train_dataset = FrequencyCombDataset(train_in, train_out, device = self.device, norm_scales = self.norm_scales, norm = False, zero_mean = False)
+        val_dataset   = FrequencyCombDataset(val_in,   val_out,   device = self.device, norm_scales = self.norm_scales, norm = False, zero_mean = False)
+        test_dataset  = FrequencyCombDataset(test_in,  test_out,  device = self.device, norm_scales = self.norm_scales, norm = False, zero_mean = False)
+
+        train_dataset.norm, train_dataset.zero_mean = self.norm, self.zero_mean
+        val_dataset.norm, val_dataset.zero_mean = self.norm, self.zero_mean
+        test_dataset.norm, test_dataset.zero_mean = self.norm, self.zero_mean
+
+        return train_dataset, val_dataset, test_dataset
+    
+    def split_dataset(self, ratios, shuffle=True):
+        '''
+        This function returns n FrequencyCombDataset objects based on the provided ratios
+        '''
+        if sum(ratios) > 1:
+            raise ValueError("The sum of the ratios must be less than or equal to 1.")
+
+        len_data = self.__len__()
+        indices = [int(sum(ratios[:i]) * len_data) for i in range(1, len(ratios) + 1)]
+
+        idx_ranges = [torch.arange(0, indices[0])] + [torch.arange(indices[i-1], indices[i]) for i in range(1, len(indices))]
+
+        idx_shuffle = torch.arange(len_data)
+        if shuffle:
+            idx_shuffle = torch.randperm(len_data)
+
+        datasets = []
+        for idx_range in idx_ranges:
+            input_tensors, output_tensors = self.input_tensors[idx_shuffle][idx_range], self.output_tensors[idx_shuffle][idx_range]
+            dataset = FrequencyCombDataset(input_tensors, output_tensors, device=self.device, norm_scales=self.norm_scales, norm=False, zero_mean=False)
+            dataset.norm, dataset.zero_mean = self.norm, self.zero_mean
+            datasets.append(dataset)
+
+        return datasets
+    
+    def concat_with(self, *datasets, recalc_norm_scales = True):
+        '''
+        This function concatenates the datasets in the FrequencyCombDataset object
+        '''
+
+        self.input_tensors = torch.cat([self.input_tensors] + [dataset.input_tensors for dataset in datasets], dim=0)
+        self.output_tensors = torch.cat([self.denormalize(self.output_tensors)] + [dataset.denormalize(dataset.output_tensors) for dataset in datasets], dim=0)
+
+        #self.input_tensors = torch.cat([self.input_tensors, new_input_tensors], dim=0)
+        #self.output_tensors = torch.cat([self.denormalize(self.output_tensors), new_output_tensors], dim=0)
+
+        # Zero mean the data
+        if self.zero_mean:
+            self.output_tensors -= torch.mean(self.output_tensors, dim=1).unsqueeze(1)
+
+        # Recalculate the normalization scales
+        if recalc_norm_scales:
+            self.calc_norm_scales()
+
+        # Normalize the data
+        if self.norm:
+            self.output_tensors = self.normalize(self.output_tensors)
 
     def __len__(self):
         return len(self.input_tensors)
     
     def make_inputs(self):
         input_tensors = [[urand.Uniform(low, high).sample().item() for low, high in self.bounds] for _ in range(self.nsamples)]
-        input_tensors = torch.as_tensor(input_tensors, dtype=torch.float32).to(self.device)
+        input_tensors = torch.as_tensor(input_tensors, dtype=torch.float32)
         return input_tensors
     
     def make_outputs(self, creation_batch_size = 1000):
