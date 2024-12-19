@@ -1,5 +1,5 @@
 #from optic.models.devices import mzm, pm
-from optic.utils import parameters
+#from optic.utils import parameters
 import numpy as np
 import torch.distributions.uniform as urand
 from scipy.optimize import minimize
