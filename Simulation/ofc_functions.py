@@ -7,35 +7,38 @@ from scipy.optimize import minimize
 import torch
 from torch.cuda.amp import autocast
 
-π = torch.pi
+#from typing import List, Tuple
 
 class parameters():
     pass
 
+def pm(Ai: torch.Tensor, u: torch.Tensor, Vpi: float) -> torch.Tensor:
 
-def pm(Ai, u, Vπ):
-
-    # calculate the output
-    Ao = Ai * torch.cos(u / Vπ * torch.pi) + 1j * Ai * torch.sin(u / Vπ * torch.pi)
+    K = torch.pi/Vpi
+    #Ao = Ai * (torch.cos(u*K) + 1j * torch.sin(u*K))
+    Ao = Ai * torch.exp(1j * K * u) 
     
     return Ao
 
-def mzm(Ai, u, Vπ, Vb):
+def mzm(Ai: torch.Tensor, u: torch.Tensor, Vpi: float, Vb: torch.Tensor) -> torch.Tensor:
 
-    # calculate the output
-    Ao = Ai * torch.cos(0.5 / Vπ * (u + Vb) * torch.pi)
-
-    return Ao
-
-
-def ddmzm(Ai, u1, u2, Vb1, Vb2, Vπ):
-
-    # calculate the output
-    Ao = 0.5 * Ai * (pm(1, u1 + Vb1, Vπ) + pm(1, u2 + Vb2, Vπ))
+    K = torch.pi/Vpi
+    Ao = Ai * torch.cos(0.5 * K * (u + Vb))
 
     return Ao
 
-def frequencyCombGenerator_MZM_MZM_PM(params, Rs, t, P, Vπ):
+def ddmzm(Ai: torch.Tensor, u1: torch.Tensor, u2: torch.Tensor, Vb1: torch.Tensor, Vb2: torch.Tensor, Vpi: float) -> torch.Tensor:
+
+    K = torch.pi/Vpi
+    
+    #Ao = 0.5 * Ai * ((torch.cos(K*(u1 + Vb1)) + 1j * torch.sin(K*(u1 + Vb1))) + 
+    #                 (torch.cos(K*(u2 + Vb2)) + 1j * torch.sin(K*(u2 + Vb2))))
+
+    Ao = 0.5 * Ai * (torch.exp(1j * K * (u1 + Vb1) ) + torch.exp(1j * K * (u2 + Vb2)))
+
+    return Ao
+
+def frequencyCombGenerator_MZM_MZM_PM(params: torch.Tensor, Rs: float, t: torch.Tensor, P: torch.Tensor, Vpi:float) -> torch.Tensor:
 
     '''
     This function generates a frequency comb signal using a PM and two MZMs.
@@ -56,38 +59,28 @@ def frequencyCombGenerator_MZM_MZM_PM(params, Rs, t, P, Vπ):
         Time vector
     P: float
         Power of the frequency comb signal (W)
-    Vπ: float
+    Vpi: float
         Half-wave voltage of the MZM (V)
 
     Returns:
     frequency_comb: array
         Frequency comb signal
     '''
-    V1, V2, V3, Phase1, Phase2, Phase3, Vb2, Vb3 = params.T
+    V1, V2, V3, Phase1, Phase2, Phase3, Vb2, Vb3 = params.T.unsqueeze(2) # Reshape each one to [N, 1] for broadcasting
 
-    t = t.unsqueeze(0).to(params.device)  # Reshape t to [1, T] for broadcasting
-    V1 = V1.unsqueeze(1)
-    V2 = V2.unsqueeze(1)
-    V3 = V3.unsqueeze(1)
-    Phase1 = Phase1.unsqueeze(1)
-    Phase2 = Phase2.unsqueeze(1)
-    Phase3 = Phase3.unsqueeze(1)
-    Vb2 = Vb2.unsqueeze(1)
-    Vb3 = Vb3.unsqueeze(1)
-
-    u1 = V1 * torch.cos(2 * torch.pi * Rs * t + Phase1)
-    u2 = V2 * torch.cos(2 * torch.pi * Rs * t + Phase2)
-    u3 = V3 * torch.cos(2 * torch.pi * Rs * t + Phase3)
+    omega_m = 2 * torch.pi * Rs
+    pi_Rs_t = omega_m * t
+    u1, u2, u3 = [V * torch.cos(pi_Rs_t + Phase) for V, Phase in zip([V1, V2, V3], [Phase1, Phase2, Phase3])]
 
     frequency_comb = P
-    frequency_comb =  pm(frequency_comb, u1, Vπ)
-    frequency_comb = mzm(frequency_comb, u2, Vπ, Vb2)
-    frequency_comb = mzm(frequency_comb, u3, Vπ, Vb3)
+    frequency_comb =  pm(frequency_comb, u1, Vpi)
+    frequency_comb = mzm(frequency_comb, u2, Vpi, Vb2)
+    frequency_comb = mzm(frequency_comb, u3, Vpi, Vb3)
 
     return frequency_comb
 
 
-def frequencyCombGenerator_PM_PM_MZM(params, Rs, t, P, Vπ):
+def frequencyCombGenerator_PM_PM_MZM(params: torch.Tensor, Rs: float, t: torch.Tensor, P: torch.Tensor, Vpi: float) -> torch.Tensor:
 
     '''
     This function generates a frequency comb signal using two PMs and a MZM.
@@ -108,37 +101,27 @@ def frequencyCombGenerator_PM_PM_MZM(params, Rs, t, P, Vπ):
         Time vector
     P: float
         Power of the frequency comb signal (W)
-    Vπ: float
+    Vpi: float
         Half-wave voltage of the MZM (V)
 
     Returns:
     frequency_comb: array
         Frequency comb signal
     '''
-    V1, V2, V3, Phase1, Phase2, Phase3, Vb3 = params.T
+    V1, V2, V3, Phase1, Phase2, Phase3, Vb3 = params.T.unsqueeze(2) # Reshape each one to [N, 1] for broadcasting
 
-    t = t.unsqueeze(0).to(params.device)  # Reshape t to [1, T] for broadcasting
-    V1 = V1.unsqueeze(1)
-    V2 = V2.unsqueeze(1)
-    V3 = V3.unsqueeze(1)
-    Phase1 = Phase1.unsqueeze(1)
-    Phase2 = Phase2.unsqueeze(1)
-    Phase3 = Phase3.unsqueeze(1)
-    Vb3 = Vb3.unsqueeze(1)
-
-    u1 = V1 * torch.cos(2 * torch.pi * Rs * t + Phase1)
-    u2 = V2 * torch.cos(2 * torch.pi * Rs * t + Phase2)
-    u3 = V3 * torch.cos(2 * torch.pi * Rs * t + Phase3)
+    pi_Rs_t = 2 * torch.pi * Rs * t
+    u1, u2, u3 = [V * torch.cos(pi_Rs_t + Phase) for V, Phase in zip([V1, V2, V3], [Phase1, Phase2, Phase3])]
 
     frequency_comb = P
-    frequency_comb =  pm(frequency_comb, u1, Vπ)
-    frequency_comb =  pm(frequency_comb, u2, Vπ)
-    frequency_comb = mzm(frequency_comb, u3, Vπ, Vb3)
+    frequency_comb =  pm(frequency_comb, u1, Vpi)
+    frequency_comb =  pm(frequency_comb, u2, Vpi)
+    frequency_comb = mzm(frequency_comb, u3, Vpi, Vb3)
 
     return frequency_comb
 
 
-def frequencyCombGenerator_DDMZM(params, Rs, t, P, Vπ):
+def frequencyCombGenerator_DDMZM(params: torch.Tensor, Rs: float, t: torch.Tensor, Vpi: float) -> torch.Tensor:
     ''' 
     This function generates a frequency comb using a dual-drive Mach-Zehnder modulator (DD-MZM)
 
@@ -161,24 +144,17 @@ def frequencyCombGenerator_DDMZM(params, Rs, t, P, Vπ):
         Frequency comb generated by the DDMZM (W)
 
     '''
-    V1, V2, Phase1, Phase2, Vb1, Vb2 = params.T
+    V1, V2, Vb1, Vb2, P = params.T.unsqueeze(2) # Reshape each one to [N, 1] for broadcasting
+    Phase1, Phase2 = 0, 0
 
-    t = t.unsqueeze(0).to(params.device)  # Reshape t to [1, T] for broadcasting
-    V1 = V1.unsqueeze(1)
-    V2 = V2.unsqueeze(1)
-    Phase1 = Phase1.unsqueeze(1)
-    Phase2 = Phase2.unsqueeze(1)
-    Vb1 = Vb1.unsqueeze(1)
-    Vb2 = Vb2.unsqueeze(1)
-
-    u1 = V1 * torch.cos(2 * torch.pi * Rs * t + Phase1)
-    u2 = V2 * torch.cos(2 * torch.pi * Rs * t + Phase2)
+    pi_Rs_t = 2 * torch.pi * Rs * t
+    u1, u2 = [V * torch.cos(pi_Rs_t + Phase) for V, Phase in zip([V1, V2], [Phase1, Phase2])]
     
-    frequency_comb = ddmzm(P, u1, u2, Vb1, Vb2, Vπ)
+    frequency_comb = ddmzm(P, u1, u2, Vb1, Vb2, Vpi)
 
     return frequency_comb
 
-def get_psd_ByFFT(signal, Fa, NFFT = 16*1024):
+def get_psd_ByFFT(signal: torch.Tensor, Fa: float, NFFT: int = 16*1024) -> tuple[torch.Tensor, torch.Tensor]:
     '''
     Calculate the Power Spectral Density (PSD) of a signal using FFT in PyTorch.
 
@@ -206,12 +182,12 @@ def get_psd_ByFFT(signal, Fa, NFFT = 16*1024):
     return psd, freqs
 
 
-def get_indx_peaks(log_Pxx, SpRs, n_peaks):
+def get_indx_peaks(log_Pxx: torch.Tensor, SpRs: int, n_peaks: int) -> tuple[torch.Tensor, torch.Tensor]:
     '''
     Function to get the indexes of the peaks in the power spectrum of the frequency comb signal
 
     Parameters:
-    log_Pxx: torch array
+    log_Pxx: torch.Tensor
         Power spectrum of the frequency comb signal
     SpRs: int
         Samples by each Rs. Each peak is separated by the Rs frequency. SpRs = (NFFT/SpS)
@@ -219,7 +195,9 @@ def get_indx_peaks(log_Pxx, SpRs, n_peaks):
         Number of peaks to be found
 
     Returns:
-    indx: list
+    peaks: torch.Tensor
+        Peaks of the power spectrum of the frequency comb signal
+    indx: torch.Tensor
         Indexes of the peaks in the power spectrum of the frequency comb signal
     '''
 
@@ -231,7 +209,7 @@ def get_indx_peaks(log_Pxx, SpRs, n_peaks):
 
     return peaks, indx
 
-def frequencyCombPeaks(params, args):
+def frequencyCombPeaks(params: torch.Tensor, args) -> torch.Tensor:
     ''' 
     Function to get the peaks of the power spectrum of the frequency comb signal
 
@@ -263,7 +241,8 @@ def frequencyCombPeaks(params, args):
         Peaks of the power spectrum of the frequency comb signal
     '''
     
-    frequency_comb = frequencyCombGenerator_MZM_MZM_PM(params, args.Rs, args.t, args.P, args.Vpi) # Generate the frequency comb signal
+    frequency_comb = frequencyCombGenerator_DDMZM(params, args.Rs, args.t, args.Vpi) # Generate the frequency comb signal
+    #frequency_comb = frequencyCombGenerator_MZM_MZM_PM(params, args.Rs, args.t, args.P, args.Vpi) # Generate the frequency comb signal
     #frequency_comb = frequencyCombGenerator_PM_PM_MZM(params, args.Rs, args.t, args.P, args.Vpi) # Generate the frequency comb signal
     Pxx, _ = get_psd_ByFFT(frequency_comb, args.Fa, args.NFFT) # Get the power spectrum of the frequency comb signal
     log_Pxx = 10*torch.log10(Pxx) # Convert the power spectrum to dB
@@ -272,7 +251,7 @@ def frequencyCombPeaks(params, args):
     return peaks
 
 
-def analytical_function_compact(params, args):
+def analytical_function_compact(params: torch.Tensor, args) -> torch.Tensor:
     '''
     Function to generate the frequency comb signal peaks of PM-MZM-MZM
 
@@ -304,30 +283,91 @@ def analytical_function_compact(params, args):
         Peaks of the power spectrum of the frequency comb signal
 
     '''
-    V1, V2, V3, Phase1, Phase2, Phase3, Vb2, Vb3 = [p.contiguous() for p in params.T]
-    t = args.t.unsqueeze(0)
+    V1, V2, V3, Phase1, Phase2, Phase3, Vb2, Vb3 = [p.contiguous() for p in params.T.unsqueeze(2)]
+    t = args.t#.unsqueeze(0)
     pi_Rs_t = 2 * torch.pi * args.Rs * t
     K = torch.pi / args.Vpi
-    u1 = V1.unsqueeze(1) * torch.cos(pi_Rs_t + Phase1.unsqueeze(1))
-    u2 = V2.unsqueeze(1) * torch.cos(pi_Rs_t + Phase2.unsqueeze(1))
-    u3 = V3.unsqueeze(1) * torch.cos(pi_Rs_t + Phase3.unsqueeze(1))
+    u1 = V1 * torch.cos(pi_Rs_t + Phase1)
+    u2 = V2 * torch.cos(pi_Rs_t + Phase2)
+    u3 = V3 * torch.cos(pi_Rs_t + Phase3)
     cos_u1_K, sin_u1_K = torch.cos(u1 * K), torch.sin(u1 * K)
-    cos_u2_Vb2_K = torch.cos((0.5 * (u2 + Vb2.unsqueeze(1))) * K)
-    cos_u3_Vb3_K = torch.cos((0.5 * (u3 + Vb3.unsqueeze(1))) * K)
+    cos_u2_Vb2_K = torch.cos((0.5 * (u2 + Vb2)) * K)
+    cos_u3_Vb3_K = torch.cos((0.5 * (u3 + Vb3)) * K)
     frequency_comb = args.P * (cos_u1_K + 1j * sin_u1_K) * cos_u2_Vb2_K * cos_u3_Vb3_K
+    
     psd = torch.fft.fft(frequency_comb, n=args.NFFT, dim=-1)
     psd = torch.fft.fftshift(psd, dim=-1)
     psd = torch.abs(psd) ** 2 / (args.NFFT * args.Fa)
     psd[psd == 0] = torch.finfo(psd.dtype).eps
     log_Pxx = 10 * torch.log10(psd)
+    
     n_peaks_2 = args.n_peaks // 2
     indx = (log_Pxx.size(-1) // 2) + torch.arange(-n_peaks_2, n_peaks_2 + 1, device=params.device).to(torch.int) * (args.NFFT // args.SpS)
     peaks = torch.index_select(log_Pxx, 1, indx)
     return peaks
 
+def analytical_function_compact_DDMZM(params: torch.Tensor, args: parameters) -> torch.Tensor:
+    '''
+    Function to generate the frequency comb signal peaks of PM-MZM-MZM
+
+    Parameters:
+    params: torch.Tensor
+        Parameters to generate the frequency comb signal
+    args: parameters
+        Parameters object with the arguments to generate the frequency comb signal
+        Should contain the following attributes: t, Rs, Vpi, P, NFFT, Fa, SpS, n_peaks
+        args.t: torch.Tensor
+            Time vector
+        args.Rs: float
+            Symbol rate (samples per second)
+        args.Vpi: float
+            Half-wave voltage of the MZM (V)
+        args.P: float
+            Power of the frequency comb signal (W)
+        args.NFFT: int
+            Number of points of the FFT (multiple of SpS)
+        args.Fa: float
+            Sampling frequency of the signal (samples per second)
+        args.SpS: int
+            Samples by each Rs
+        args.n_peaks: int
+            Number of peaks to be found (odd number)
+
+    Returns:
+    peaks: torch.Tensor
+        Peaks of the power spectrum of the frequency comb signal
+
+    '''
+    # calculate the frequency comb signal
+    V1, V2, Vb1, Vb2, P = [p.contiguous() for p in params.T.unsqueeze(2)]
+    Phase1, Phase2 = 0, 0
+
+    t = args.t#.unsqueeze(0)
+    pi_Rs_t = 2 * torch.pi * args.Rs * t
+    K = torch.pi / args.Vpi
+
+    u1 = V1 * torch.cos(pi_Rs_t + Phase1)
+    u2 = V2 * torch.cos(pi_Rs_t + Phase2)
+
+    frequency_comb =  0.5 * P * (torch.exp(1j * K * (u1 + Vb1) ) + torch.exp(1j * K * (u2 + Vb2)))
+    
+    # calculate the PSD
+    psd = torch.fft.fft(frequency_comb, n=args.NFFT, dim=-1)
+    psd = torch.fft.fftshift(psd, dim=-1)
+    psd = torch.abs(psd) ** 2 / (args.NFFT * args.Fa)
+    psd[psd == 0] = torch.finfo(psd.dtype).eps
+    log_Pxx = 10 * torch.log10(psd)
+    
+    # get the peaks
+    n_peaks_2 = args.n_peaks // 2
+    indx = (log_Pxx.size(-1) // 2) + torch.arange(-n_peaks_2, n_peaks_2 + 1, device=params.device).to(torch.int) * (args.NFFT // args.SpS)
+    peaks = torch.index_select(log_Pxx, 1, indx)
+    
+    return peaks
+
 
 @torch.jit.script
-def analytical_function_jit(params, t, Rs, Vpi, P, NFFT, Fa, SpS, n_peaks):
+def analytical_function_jit(params: torch.Tensor, t: torch.Tensor, Rs: torch.Tensor, Vpi: torch.Tensor, P: torch.Tensor, NFFT: torch.Tensor, Fa: torch.Tensor, SpS: torch.Tensor, n_peaks: torch.Tensor) -> torch.Tensor:
 
     '''
     Function to generate the frequency comb signal peaks of PM-MZM-MZM using JIT
@@ -356,20 +396,20 @@ def analytical_function_jit(params, t, Rs, Vpi, P, NFFT, Fa, SpS, n_peaks):
     peaks: torch.Tensor
         Peaks of the power spectrum of the frequency comb signal
     '''
-    V1, V2, V3, Phase1, Phase2, Phase3, Vb2, Vb3 = [p.contiguous() for p in params.T]
+    V1, V2, V3, Phase1, Phase2, Phase3, Vb2, Vb3 = [p.contiguous() for p in params.T.unsqueeze(2)]
 
-    t = t.unsqueeze(0)
+    #t = t.unsqueeze(0)
     pi_Rs_t = 2 * torch.pi * Rs * t
     K = torch.pi / Vpi
 
     with autocast(enabled=True):
-        u1 = V1.unsqueeze(1) * torch.cos(pi_Rs_t + Phase1.unsqueeze(1))
-        u2 = V2.unsqueeze(1) * torch.cos(pi_Rs_t + Phase2.unsqueeze(1))
-        u3 = V3.unsqueeze(1) * torch.cos(pi_Rs_t + Phase3.unsqueeze(1))
+        u1 = V1 * torch.cos(pi_Rs_t + Phase1)
+        u2 = V2 * torch.cos(pi_Rs_t + Phase2)
+        u3 = V3 * torch.cos(pi_Rs_t + Phase3)
         cos_u1_K = torch.cos(u1 * K)
         sin_u1_K = torch.sin(u1 * K)
-        cos_u2_Vb2_K = torch.cos((0.5 * (u2 + Vb2.unsqueeze(1))) * K)
-        cos_u3_Vb3_K = torch.cos((0.5 * (u3 + Vb3.unsqueeze(1))) * K)
+        cos_u2_Vb2_K = torch.cos((0.5 * (u2 + Vb2)) * K)
+        cos_u3_Vb3_K = torch.cos((0.5 * (u3 + Vb3)) * K)
         real_part = P * cos_u1_K * cos_u2_Vb2_K * cos_u3_Vb3_K
         imag_part = P * sin_u1_K * cos_u2_Vb2_K * cos_u3_Vb3_K
         frequency_comb = torch.complex(real_part, imag_part)
@@ -387,7 +427,7 @@ def analytical_function_jit(params, t, Rs, Vpi, P, NFFT, Fa, SpS, n_peaks):
     return peaks
 
 
-def analytical_function_compact_numpy(params, args):
+def analytical_function_compact_numpy(params: list, args: parameters) -> np.array:
     '''
     Function to generate the frequency comb signal peaks of PM-MZM-MZM using NumPy
 
@@ -415,7 +455,7 @@ def analytical_function_compact_numpy(params, args):
             Number of peaks to be found (odd number)
 
     Returns:
-    peaks: numpy array
+    peaks: numpy.array
         Peaks of the power spectrum of the frequency comb signal
     '''
 
@@ -430,18 +470,73 @@ def analytical_function_compact_numpy(params, args):
     cos_u2_Vb2_K = np.cos((0.5 * (u2 + Vb2)) * K)
     cos_u3_Vb3_K = np.cos((0.5 * (u3 + Vb3)) * K)
     frequency_comb = args.P * (cos_u1_K + 1j * sin_u1_K) * cos_u2_Vb2_K * cos_u3_Vb3_K
+    
     psd = np.fft.fft(frequency_comb, n=args.NFFT)
     psd = np.fft.fftshift(psd)
     psd = np.abs(psd) ** 2 / (args.NFFT * args.Fa)
     psd[psd == 0] = np.finfo(psd.dtype).eps
     log_Pxx = 10 * np.log10(psd)
+    
     n_peaks_2 = args.n_peaks // 2
     indx = (log_Pxx.shape[-1] // 2) + np.arange(-n_peaks_2, n_peaks_2 + 1, dtype=int) * (args.NFFT // args.SpS)
     peaks = log_Pxx[indx]
     return peaks
 
+def analytical_function_compact_numpy_DDMZM(params: list, args: parameters) -> np.array:
+    '''
+    Function to generate the frequency comb signal peaks of PM-MZM-MZM using NumPy
 
-def optimization_flatComb_numpy(initial_guess, args, bounds, n_max = 100, method = "SLSQP"):
+    Parameters:
+    params: list
+        Parameters to generate the frequency comb signal
+    args: parameters
+        Parameters object with the arguments to generate the frequency comb signal
+        Should contain the following attributes: t, Rs, Vpi, P, NFFT, Fa, SpS, n_peaks
+        args.t: numpy array
+            Time vector
+        args.Rs: float
+            Symbol rate (samples per second)
+        args.Vpi: float
+            Half-wave voltage of the MZM (V)
+        args.P: float
+            Power of the frequency comb signal (W)
+        args.NFFT: int
+            Number of points of the FFT (multiple of SpS)
+        args.Fa: float
+            Sampling frequency of the signal (samples per second)
+        args.SpS: int
+            Samples by each Rs
+        args.n_peaks: int
+            Number of peaks to be found (odd number)
+
+    Returns:
+    peaks: numpy.array
+        Peaks of the power spectrum of the frequency comb signal
+    '''
+    V1, V2, Vb1, Vb2, P = params
+    Phase1, Phase2 = 0, 0
+    pi_Rs_t = 2 * np.pi * args.Rs * args.t
+    K = np.pi / args.Vpi
+    
+    u1 = V1 * np.cos(pi_Rs_t + Phase1)
+    u2 = V2 * np.cos(pi_Rs_t + Phase2)
+
+    frequency_comb =  0.5 * P * (np.exp(1j * K * (u1 + Vb1) ) + np.exp(1j * K * (u2 + Vb2)))
+    
+    # calculate the PSD
+    psd = np.fft.fft(frequency_comb, n=args.NFFT)
+    psd = np.fft.fftshift(psd)
+    psd = np.abs(psd) ** 2 / (args.NFFT * args.Fa)
+    psd[psd == 0] = np.finfo(psd.dtype).eps
+    log_Pxx = 10 * np.log10(psd)
+    
+    # get the peaks
+    n_peaks_2 = args.n_peaks // 2
+    indx = (log_Pxx.shape[-1] // 2) + np.arange(-n_peaks_2, n_peaks_2 + 1, dtype=int) * (args.NFFT // args.SpS)
+    peaks = log_Pxx[indx]
+    return peaks
+
+def optimization_flatComb_numpy(initial_guess: list, args: parameters, bounds: list, n_max: int = 100, method: str = "SLSQP") -> tuple[list, np.array, float]:
 
     ''' 
     Function to optimize the parameters of the frequency comb signal
@@ -481,12 +576,16 @@ def optimization_flatComb_numpy(initial_guess, args, bounds, n_max = 100, method
         Optimized parameters of the frequency comb signal
     '''
 
-    def objective_function(params, *args):
+    #peaks_func = analytical_function_compact_numpy
+    peaks_func = analytical_function_compact_numpy_DDMZM
 
-        peaks = analytical_function_compact_numpy(params, *args)
+    def objective_function(params: list , *args: parameters) -> float:
+
+        peaks = peaks_func(params, *args)
         var2 = np.var(peaks)**2
         
         return var2
+    
     optimized_params = initial_guess
     n = 0
     while n < n_max:
@@ -494,7 +593,7 @@ def optimization_flatComb_numpy(initial_guess, args, bounds, n_max = 100, method
         result = minimize(objective_function, initial_guess, args = args, method=method, bounds = bounds)
         optimized_params = result.x
         
-        peaks = analytical_function_compact_numpy(optimized_params, args)
+        peaks = peaks_func(optimized_params, args)
         min_max = np.max(peaks) - np.min(peaks)
 
         if min_max < 1:
@@ -504,7 +603,7 @@ def optimization_flatComb_numpy(initial_guess, args, bounds, n_max = 100, method
     return optimized_params, peaks, min_max
 
 
-def create_flatCombs_numpy(nsamples, args, bounds, upper_min_max = 5.0, n_max = 100, method = "COBYLA"):
+def create_flatCombs_numpy(nsamples: int, args: parameters, bounds: tuple, upper_min_max: float = 5.0, n_max: int = 100, method: str = "COBYLA") -> tuple[list, list, list, list]:
     '''
     Function to create the flatComb datasets using scipy.optimize.minimize and NumPy
 
