@@ -397,11 +397,12 @@ def run_one_epoch_inverse_PINN(mode, loader, forward_func, ofc_args, inverse_mod
         inverse_outputs = inverse_model(targets)  # Forward pass through the inverse model
 
         # Perform some operation in the inverse_outputs:
-        forward_outputs = forward_func(inverse_outputs, ofc_args)  # Ensure this function preserves gradients
+        forward_outputs = forward_func(inverse_outputs.to('cpu'), ofc_args.t, ofc_args.Rs, ofc_args.Vpi, ofc_args.NFFT, ofc_args.Fa, ofc_args.SpS, ofc_args.n_peaks).to(device)  # analitical function
         forward_outputs = forward_outputs - torch.mean(forward_outputs, dim=-1, keepdim=True) * loader.dataset.zero_mean
         forward_outputs = loader.dataset.normalize(forward_outputs)
 
         # Calculate loss
+
         loss = loss_fn(forward_outputs, targets)
         total_loss += loss.item()
 
@@ -445,7 +446,7 @@ class FrequencyCombNet(nn.Module):
     
 import copy
 
-# Define your custom dataset
+
 class FrequencyCombDataset(Dataset):
 
     '''
@@ -502,10 +503,12 @@ class FrequencyCombDataset(Dataset):
             self.bounds = bounds
 
             # Generate inputs
-            self.input_tensors = self.make_inputs().to(self.device)
+            self.input_tensors = self.make_inputs()
 
             # Generate outputs using batch processing
             self.output_tensors = self.make_outputs(creation_batch_size).to(self.device)
+
+            self.input_tensors = self.input_tensors.to(self.device)
 
         # Second way to create the dataset: using the inputs and outputs already generated
         elif len(args) == 2:
