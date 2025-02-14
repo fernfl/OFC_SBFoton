@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 import torch.distributions.uniform as urand
 
 
-def convert_to_real_loss(loss, norm_scales):
+def convert_to_real_loss(loss: list, norm_scales: list) -> np.array:
     '''
     Function to convert the trainiment loss to the real loss, considering the normalization of the data in FrequencyCombDataset
 
@@ -15,7 +15,7 @@ def convert_to_real_loss(loss, norm_scales):
     norm_loss = (x1_norm - x2_norm)^2 = (x1 - x2)^2/(max - min)^2 = real_loss/(max - min)^2
 
     Parameters:
-    loss: numpy array
+    loss: list
         Normalized loss
     norm_scales: list
         Normalization scales of the data containing the min and max values: [min, max] 
@@ -31,7 +31,7 @@ def convert_to_real_loss(loss, norm_scales):
     return denorm_loss.squeeze()
 
 
-def plot_training_progress(train_losses, val_losses, title = "Training and Validation Losses", ylabel = "Loss", average_curves = False, M = 200):
+def plot_training_progress(train_losses: list, val_losses: list, title: str = "Training and Validation Losses", ylabel: str = "Loss", average_curves: bool = False, M: int = 200):
 
     '''
     Function to plot the training and validation losses
@@ -68,12 +68,12 @@ def plot_training_progress(train_losses, val_losses, title = "Training and Valid
     plt.xlabel('Epoch')
     plt.ylabel(ylabel)
     plt.legend()
-    plt.grid(which='both', alpha=0.5)
-    plt.minorticks_on()
+    #plt.grid(which='both', alpha=0.5)
+    #plt.minorticks_on()
     plt.show()
 
 
-def plot_training_progress_style(train_losses, val_losses, title = fr"$MSE\; de\; Treinamento\; e\; Validação$", ylabel = r"$Erro\; (dB/Hz)^2$",ylim=(0,10), average_curves = False, M = 200, figname = "training_progress.png"):
+def plot_training_progress_style(train_losses: list, val_losses: list, title: str = fr"$MSE\; de\; Treinamento\; e\; Validação$", ylabel: str = r"$Erro\; (dB/Hz)^2$",ylim: tuple = (0,10), average_curves: bool = False, M: int = 200, figname: str = "training_progress.png"):
     '''
     Function to plot the training and validation losses with the IEEE style
 
@@ -112,9 +112,10 @@ def plot_training_progress_style(train_losses, val_losses, title = fr"$MSE\; de\
         ax.autoscale(tight=True)
 
         ax.set_title(title)
-        ax.set_xlabel(r'$Épocas\times 100$')
-        ax.set_ylabel(ylabel)
-        ax.legend()
+        ax.set_xlabel(r'$Épocas\times 100$', fontsize = 10)
+        ax.set_ylabel(ylabel, fontsize = 10)
+        ax.legend(fontsize = 8)
+        ax.tick_params(labelsize=9)
         ax.set_ylim(ylim)
         ax.set_xlim(0, len(train_losses)/100)
 
@@ -124,7 +125,7 @@ def plot_training_progress_style(train_losses, val_losses, title = fr"$MSE\; de\
         plt.close()
 
 
-def get_num_params(model):
+def get_num_params(model: nn.Module) -> int:
     '''
     Function to calculate the number of parameters of a neural network model from the torch model
 
@@ -141,7 +142,7 @@ def get_num_params(model):
         n_params += param.numel()
     return n_params
 
-def calc_num_params(architecture):
+def calc_num_params(architecture: list) -> int:
     '''
     Function to calculate the number of parameters of a neural network model from the architecture list
 
@@ -160,15 +161,17 @@ def calc_num_params(architecture):
         n_params += architecture[i]*architecture[i + 1] + architecture[i + 1]
     return n_params
 
-def get_architecture(loaded_dict_data):
+def get_architecture(loaded_dict_data: dict) -> list:
     '''
     Get the architecture of the model from the loaded dictionary data
     
     Parameters:
-    loaded_dict_data: dictionary with the model data
+    loaded_dict_data: dict
+    dictionary with the model data
 
     Returns:
-    architecture: list with the architecture of the model
+    architecture: list
+    list with the architecture of the model
     '''
     architecture = []
     model_state = loaded_dict_data["model_state_dict"]
@@ -213,24 +216,25 @@ def plot_comparison_style(target, output, freqs_GHz, loss, figname, title, ylim 
         fig, ax = plt.subplots()
         ax.plot(freqs_GHz, target, "s", label=r'$Alvo$')
         ax.plot(freqs_GHz, output, "o", label=r'$Predição$')
-        ax.legend()
+        ax.legend(fontsize = 9)
         ax.autoscale(tight=True)
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel(ylabel)
+        ax.set_xlabel(xlabel, fontsize = 10)
+        ax.set_ylabel(ylabel, fontsize = 10)
         ax.set_xticks(freqs_GHz)
         ax.set_title(title)
         ax.set_xlim(freqs_GHz[0]-0.5,freqs_GHz[-1]+0.5)
         ax.set_ylim(ylim)
+        ax.tick_params(labelsize=9) 
 
         text = fr"MSE: {loss:.3f} $(dB/Hz)^2$"
         if show_max_min:
             text += "\n" + fr"Max - Min: {np.max(output) - np.min(output):.3f} $dB$"
-        ax.text(0, ylim[0]*0.88, text, ha = 'center', bbox=dict(facecolor='white', alpha=1, edgecolor='silver', boxstyle='round,pad=0.3'))
+        ax.text(0, ylim[0]*0.97, text, ha = 'center', bbox=dict(facecolor='white', alpha=0.6, edgecolor='silver', boxstyle='round,pad=0.3'), fontsize=9)
         fig.savefig(figname, dpi=300)
         plt.show()
         plt.close()
 
-def run_one_epoch_forward(mode, loader, model, loss_fn, device="cpu", optimizer=None):
+def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss, device: str ="cpu", optimizer: torch.optim =None):
 
     '''
     Function to run one epoch of the forward model
@@ -346,17 +350,17 @@ def run_one_epoch_inverse(mode, loader, forward_model, inverse_model, loss_fn, d
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
 
 
-def run_one_epoch_inverse_PINN(mode, loader, forward_func, ofc_args, inverse_model, loss_fn, device="cpu", optimizer=None):
+def run_one_epoch_inverse_DiffGen(mode, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn, device="cpu", optimizer=None):
 
     '''
-    Function to run one epoch of the inverse model with the PINN approach (with the forward model)
+    Function to run one epoch of the inverse model with a Differentiable OFC Generator instead of the forward model
 
     Parameters:
     mode: str
         Mode of the model: 'train', 'val' or 'test'
     loader: torch DataLoader
         DataLoader of the dataset
-    forward_func: function
+    diff_ofc_gen: function
         Function to calculate the forward model outputs using torch tensors
     ofc_args: list
         Arguments of the forward function
@@ -397,11 +401,13 @@ def run_one_epoch_inverse_PINN(mode, loader, forward_func, ofc_args, inverse_mod
         inverse_outputs = inverse_model(targets)  # Forward pass through the inverse model
 
         # Perform some operation in the inverse_outputs:
-        forward_outputs = forward_func(inverse_outputs, ofc_args)  # Ensure this function preserves gradients
-        forward_outputs = forward_outputs - torch.mean(forward_outputs, dim=-1, keepdim=True) * loader.dataset.zero_mean
+        forward_outputs = diff_ofc_gen(inverse_outputs.to('cpu'), ofc_args.t, ofc_args.Rs, ofc_args.Vpi, ofc_args.NFFT, ofc_args.Fa, ofc_args.SpS, ofc_args.n_peaks).to(device)  # analitical function
+        if loader.dataset.zero_mean:
+            forward_outputs = forward_outputs - torch.mean(forward_outputs, dim=-1, keepdim=True)
         forward_outputs = loader.dataset.normalize(forward_outputs)
 
         # Calculate loss
+
         loss = loss_fn(forward_outputs, targets)
         total_loss += loss.item()
 
@@ -445,7 +451,7 @@ class FrequencyCombNet(nn.Module):
     
 import copy
 
-# Define your custom dataset
+
 class FrequencyCombDataset(Dataset):
 
     '''
@@ -502,10 +508,12 @@ class FrequencyCombDataset(Dataset):
             self.bounds = bounds
 
             # Generate inputs
-            self.input_tensors = self.make_inputs().to(self.device)
+            self.input_tensors = self.make_inputs()
 
             # Generate outputs using batch processing
             self.output_tensors = self.make_outputs(creation_batch_size).to(self.device)
+
+            self.input_tensors = self.input_tensors.to(self.device)
 
         # Second way to create the dataset: using the inputs and outputs already generated
         elif len(args) == 2:
