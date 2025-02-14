@@ -654,10 +654,12 @@ class FrequencyCombDataset(Dataset):
     
     def make_outputs(self, creation_batch_size = 1000):
         output_tensors_list = []
+    
         for i in range(0, self.input_tensors.size(0), creation_batch_size):
             batch = self.input_tensors[i:i + creation_batch_size]
-            output_tensors = self.function(batch, self.ofc_args)
+            output_tensors = self.function(batch, self.ofc_args.t, self.ofc_args.Rs, self.ofc_args.Vpi, self.ofc_args.NFFT, self.ofc_args.Fa, self.ofc_args.SpS, self.ofc_args.n_peaks)
             output_tensors_list.append(output_tensors)
+        
         output_tensors = torch.cat(output_tensors_list, dim=0)
         return output_tensors
     
