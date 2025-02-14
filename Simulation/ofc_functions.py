@@ -635,7 +635,7 @@ def analytical_function_compact_numpy_DDMZM(params: list, args: parameters) -> n
     # get the peaks
     n_peaks_2 = args.n_peaks // 2
     indx = (log_Pxx.shape[-1] // 2) + np.arange(-n_peaks_2, n_peaks_2 + 1, dtype=int) * (args.NFFT // args.SpS)
-    peaks = log_Pxx[indx]
+    peaks = log_Pxx[:, indx]
     return peaks
 
 def optimization_flatComb_numpy(initial_guess: list, args: parameters, bounds: list, n_max: int = 100, method: str = "SLSQP") -> tuple[list, np.array, float]:
