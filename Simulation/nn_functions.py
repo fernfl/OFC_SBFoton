@@ -214,27 +214,28 @@ def plot_comparison_style(target, output, freqs_GHz, loss, figname, title, ylim 
     
     with plt.style.context(['science', 'ieee', "grid", 'no-latex']):
         fig, ax = plt.subplots()
-        ax.plot(freqs_GHz, target, "s", label=r'$Alvo$')
-        ax.plot(freqs_GHz, output, "o", label=r'$Predição$')
-        ax.legend(fontsize = 9)
+        ax.plot(freqs_GHz, target, "s", label=r'$Alvo$', markersize=4)
+        ax.plot(freqs_GHz, output, "o", label=r'$Predição$', markersize=4)
+        ax.legend(fontsize = 8)
         ax.autoscale(tight=True)
-        ax.set_xlabel(xlabel, fontsize = 10)
-        ax.set_ylabel(ylabel, fontsize = 10)
-        ax.set_xticks(freqs_GHz)
+        ax.set_xlabel(xlabel, fontsize = 8)
+        ax.set_ylabel(ylabel, fontsize = 8)
+        #ax.set_xticks(freqs_GHz)
+        ax.set_xlim(freqs_GHz[0]-1,freqs_GHz[-1]+1)
         ax.set_title(title)
-        ax.set_xlim(freqs_GHz[0]-0.5,freqs_GHz[-1]+0.5)
+        ax.set_xlim(freqs_GHz[0]-1,freqs_GHz[-1]+1)
         ax.set_ylim(ylim)
-        ax.tick_params(labelsize=9) 
+        ax.tick_params(labelsize=8) 
 
         text = fr"MSE: {loss:.3f} $(dB/Hz)^2$"
         if show_max_min:
             text += "\n" + fr"Max - Min: {np.max(output) - np.min(output):.3f} $dB$"
-        ax.text(0, ylim[0]*0.97, text, ha = 'center', bbox=dict(facecolor='white', alpha=0.6, edgecolor='silver', boxstyle='round,pad=0.3'), fontsize=9)
+        ax.text(0, ylim[0]*0.97, text, ha = 'center', bbox=dict(facecolor='white', alpha=0.6, edgecolor='silver', boxstyle='round,pad=0.3'), fontsize=8)
         fig.savefig(figname, dpi=300)
         plt.show()
         plt.close()
 
-def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss, device: str ="cpu", optimizer: torch.optim =None):
+def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss, device: str ="cpu", optimizer: torch.optim = None, gradient_clipping: bool = False) -> tuple:
 
     '''
     Function to run one epoch of the forward model
@@ -280,6 +281,8 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
         if mode == 'train':
             optimizer.zero_grad()
             loss.backward()
+            if gradient_clipping:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
         n_loops += 1
@@ -287,7 +290,7 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
     avg_loss = total_loss / n_loops
     return avg_loss, outputs, targets
 
-def run_one_epoch_inverse(mode, loader, forward_model, inverse_model, loss_fn, device="cpu", optimizer=None):
+def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, gradient_clipping: bool = False) -> tuple:
 
     '''
     Function to run one epoch of the inverse model
@@ -342,6 +345,8 @@ def run_one_epoch_inverse(mode, loader, forward_model, inverse_model, loss_fn, d
         if mode == 'train':
             optimizer.zero_grad()  # Reset gradients tensors
             loss.backward()  # Calculate gradients
+            if gradient_clipping:
+                torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
             optimizer.step()  # Update weights
 
         n_loops += 1
@@ -350,7 +355,7 @@ def run_one_epoch_inverse(mode, loader, forward_model, inverse_model, loss_fn, d
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
 
 
-def run_one_epoch_inverse_DiffGen(mode, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn, device="cpu", optimizer=None):
+def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, gradient_clipping: bool = False) -> tuple:
 
     '''
     Function to run one epoch of the inverse model with a Differentiable OFC Generator instead of the forward model
@@ -414,6 +419,8 @@ def run_one_epoch_inverse_DiffGen(mode, loader, diff_ofc_gen, ofc_args, inverse_
         if mode == 'train':
             optimizer.zero_grad()  # Reset gradients tensors
             loss.backward()  # Calculate gradients
+            if gradient_clipping:
+                torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
             optimizer.step()  # Update weights
 
         n_loops += 1
@@ -423,6 +430,7 @@ def run_one_epoch_inverse_DiffGen(mode, loader, diff_ofc_gen, ofc_args, inverse_
     # Return outputs for analysis if needed
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
 
+"""
 class FrequencyCombNet(nn.Module):
 
     '''
@@ -448,9 +456,75 @@ class FrequencyCombNet(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
-    
-import copy
+#"""
 
+#'''
+class FrequencyCombNet(nn.Module):
+    """
+    Neural network model with flexible architecture and optimization-friendly features.
+    
+    Parameters:
+    -----------
+    architecture : list
+        Network architecture (e.g., [input_dim, hidden_dim1, ..., output_dim])
+    activation : str (default: 'relu')
+        Activation function ('relu', 'leaky_relu', 'selu', 'tanh')
+    use_batchnorm : bool (default: False)
+        Whether to use batch normalization
+    dropout_rate : float (default: 0.0)
+        Dropout rate (0.0 means no dropout)
+    """
+    
+    def __init__(self, architecture, activation='relu', use_batchnorm=False, dropout_rate=0.0):
+        super(FrequencyCombNet, self).__init__()
+        self.architecture = architecture
+        self.activation = activation
+        self.use_batchnorm = use_batchnorm
+        self.dropout_rate = dropout_rate
+        
+        layers = []
+        
+        # Input to first hidden layer
+        layers.append(nn.Linear(architecture[0], architecture[1]))
+        if self.use_batchnorm:
+            layers.append(nn.BatchNorm1d(architecture[1]))
+        
+        # Hidden layers
+        for i in range(1, len(architecture) - 1):
+            layers.append(self._get_activation())
+            if dropout_rate > 0.0:
+                layers.append(nn.Dropout(dropout_rate))
+            layers.append(nn.Linear(architecture[i], architecture[i+1]))
+            if self.use_batchnorm and i < len(architecture) - 2:  # No batchnorm before output
+                layers.append(nn.BatchNorm1d(architecture[i+1]))
+        
+        self.layers = nn.Sequential(*layers)
+        
+        # Initialize weights
+        self._initialize_weights()
+
+    def _get_activation(self):
+        if self.activation == 'relu':
+            return nn.ReLU()
+        elif self.activation == 'leaky_relu':
+            return nn.LeakyReLU(0.01)
+        elif self.activation == 'selu':
+            return nn.SELU()
+        elif self.activation == 'tanh':
+            return nn.Tanh()
+        else:
+            raise ValueError(f"Unsupported activation: {self.activation}")
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity=self.activation)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        return self.layers(x)
+#'''
 
 class FrequencyCombDataset(Dataset):
 
@@ -571,18 +645,6 @@ class FrequencyCombDataset(Dataset):
         train_in, train_out = self.input_tensors[idx_shuffle][train_idxs], self.output_tensors[idx_shuffle][train_idxs]
         val_in, val_out     = self.input_tensors[idx_shuffle][val_idxs],   self.output_tensors[idx_shuffle][val_idxs]
         test_in, test_out   = self.input_tensors[idx_shuffle][test_idxs],  self.output_tensors[idx_shuffle][test_idxs]
-
-        '''
-        #using deepcopy to avoid changing the original dataset
-        train_dataset = copy.deepcopy(self)
-        train_dataset.input_tensors, train_dataset.output_tensors = None, None
-        val_dataset   = copy.deepcopy(train_dataset)
-        test_dataset  = copy.deepcopy(train_dataset)
-
-        train_dataset.input_tensors, train_dataset.output_tensors = train_in, train_out
-        val_dataset.input_tensors, val_dataset.output_tensors = val_in, val_out
-        test_dataset.input_tensors, test_dataset.output_tensors = test_in, test_out
-        #'''
 
         # Create the datasets
 

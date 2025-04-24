@@ -345,8 +345,8 @@ def frequencyCombPeaks(params: torch.Tensor, t: torch.Tensor, Rs: float, Vpi: fl
     '''
     
     #frequency_comb = frequencyCombGenerator_DDMZM(params, Rs, t, Vpi) # Generate the frequency comb signal
-    frequency_comb = frequencyCombGenerator_PM_PM_MZM(params, Rs, t, Vpi) # Generate the frequency comb signal
-    #frequency_comb = frequencyCombGenerator_PM_MZM_MZM(params, Rs, t, Vpi) # Generate the frequency comb signal
+    #frequency_comb = frequencyCombGenerator_PM_PM_MZM(params, Rs, t, Vpi) # Generate the frequency comb signal
+    frequency_comb = frequencyCombGenerator_PM_MZM_MZM(params, Rs, t, Vpi) # Generate the frequency comb signal
 
     Pxx, _ = get_psd_ByFFT(frequency_comb, Fa, NFFT) # Get the power spectrum of the frequency comb signal
     log_Pxx = 10*torch.log10(Pxx) # Convert the power spectrum to dB
@@ -755,8 +755,8 @@ def optimization_flatComb_numpy(initial_guess: list, args: parameters, bounds: l
         Optimized parameters of the frequency comb signal
     '''
     #peaks_func = analytical_function_compact_numpy_DDMZM
-    peaks_func = analytical_function_compact_numpy_PM_PM_MZM
-    #peaks_func = analytical_function_compact_numpy_PM_MZM_MZM
+    #peaks_func = analytical_function_compact_numpy_PM_PM_MZM
+    peaks_func = analytical_function_compact_numpy_PM_MZM_MZM
 
     def objective_function(params: list , *args: parameters) -> float:
 
