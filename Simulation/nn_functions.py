@@ -6,6 +6,9 @@ from torch import nn
 from torch.utils.data import Dataset
 import torch.distributions.uniform as urand
 
+from torch.amp import autocast, GradScaler
+from contextlib import nullcontext
+
 
 def convert_to_real_loss(loss: list, norm_scales: list) -> np.array:
     '''
@@ -235,8 +238,9 @@ def plot_comparison_style(target, output, freqs_GHz, loss, figname, title, ylim 
         plt.show()
         plt.close()
 
-def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss, device: str ="cpu", optimizer: torch.optim = None, gradient_clipping: bool = False) -> tuple:
 
+
+def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss._Loss, device: str = "cpu", optimizer: torch.optim.Optimizer = None, use_gradient_clipping: bool = False, use_autocast: bool = False, scaler: GradScaler = None) -> tuple:
     '''
     Function to run one epoch of the forward model
 
@@ -253,6 +257,12 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
         Device to run the model
     optimizer: torch optimizer
         Optimizer of the model
+    gradient_clipping: bool
+        If True, apply gradient clipping
+    use_autocast: bool
+        If True, use autocast for mixed precision training
+    scaler: torch.amp.GradScaler
+        GradScaler for mixed precision training
 
     Returns:
     avg_loss: float
@@ -265,32 +275,48 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
 
     if mode == 'train':
         model.train()
-    elif mode == 'val' or mode == "test":
+    elif mode in ['val', 'test']:
         model.eval()
     else:
-        raise ValueError("Invalide mode. Try to use 'train', 'val' or 'test'.")
+        raise ValueError("Invalid mode. Try 'train', 'val' or 'test'.")
 
     total_loss = 0.0
     n_loops = 0
-    for inputs, targets in loader:
 
-        outputs = model(inputs) # Calculate outputs
-        loss = loss_fn(outputs, targets) # Calculate loss
-        total_loss += loss.item()
+    for inputs, targets in loader:
+        inputs, targets = inputs.to(device), targets.to(device)
+
+        if use_autocast:
+            context = autocast()
+        else:
+            context = nullcontext()
+
+        with context:
+            outputs = model(inputs)
+            loss = loss_fn(outputs, targets)
 
         if mode == 'train':
             optimizer.zero_grad()
-            loss.backward()
-            if gradient_clipping:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
+            if scaler is not None and use_autocast:
+                scaler.scale(loss).backward()
+                if use_gradient_clipping:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                if use_gradient_clipping:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
 
+        total_loss += loss.item()
         n_loops += 1
 
     avg_loss = total_loss / n_loops
     return avg_loss, outputs, targets
 
-def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, gradient_clipping: bool = False) -> tuple:
+def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, use_gradient_clipping: bool = False, use_autocast: bool = False, scaler: GradScaler = None) -> tuple:
 
     '''
     Function to run one epoch of the inverse model
@@ -310,6 +336,12 @@ def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_
         Device to run the model 
     optimizer: torch optimizer
         Optimizer of the model
+    use_gradient_clipping: bool
+        If True, apply gradient clipping
+    use_autocast: bool
+        If True, use autocast for mixed precision training 
+    scaler: torch.amp.GradScaler
+        GradScaler for mixed precision training
 
     Returns:
     avg_loss: float
@@ -334,28 +366,40 @@ def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_
     total_loss = 0.0
     n_loops = 0
     for inputs, targets in loader:
-        
-        inverse_outputs = inverse_model(targets) # Forward pass through the inverse model
-        forward_outputs = forward_model(inverse_outputs) # Forward pass through the forward model
 
-        # Calculate loss
-        loss = loss_fn(forward_outputs, targets)
-        total_loss += loss.item()
+        if use_autocast:
+            context = autocast()
+        else:
+            context = nullcontext()
+
+        with context:
+            inverse_outputs = inverse_model(targets) # Forward pass through the inverse model
+            forward_outputs = forward_model(inverse_outputs) # Forward pass through the forward model
+            loss = loss_fn(forward_outputs, targets) # Calculate loss
 
         if mode == 'train':
-            optimizer.zero_grad()  # Reset gradients tensors
-            loss.backward()  # Calculate gradients
-            if gradient_clipping:
-                torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
-            optimizer.step()  # Update weights
+            optimizer.zero_grad() # Reset gradients tensors
+            if scaler is not None and use_autocast:
+                scaler.scale(loss).backward()
+                if use_gradient_clipping:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward() # Calculate gradients
+                if use_gradient_clipping:
+                    torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
+                optimizer.step() # Update weights
 
+        total_loss += loss.item()
         n_loops += 1
 
     avg_loss = total_loss / n_loops
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
 
 
-def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, gradient_clipping: bool = False) -> tuple:
+def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, use_gradient_clipping: bool = False, use_autocast: bool = False, scaler: GradScaler = None) -> tuple:
 
     '''
     Function to run one epoch of the inverse model with a Differentiable OFC Generator instead of the forward model
@@ -377,6 +421,12 @@ def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inv
         Device to run the model
     optimizer: torch optimizer  
         Optimizer of the model
+    use_gradient_clipping: bool
+        If True, apply gradient clipping
+    use_autocast: bool
+        If True, use autocast for mixed precision training
+    scaler: torch.amp.GradScaler
+        GradScaler for mixed precision training
 
     Returns:
     avg_loss: float
@@ -403,26 +453,38 @@ def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inv
     
     for inputs, targets in loader:
 
-        inverse_outputs = inverse_model(targets)  # Forward pass through the inverse model
+        if use_autocast:
+            context = autocast()
+        else:
+            context = nullcontext()
 
-        # Perform some operation in the inverse_outputs:
-        forward_outputs = diff_ofc_gen(inverse_outputs.to('cpu'), ofc_args.t, ofc_args.Rs, ofc_args.Vpi, ofc_args.NFFT, ofc_args.Fa, ofc_args.SpS, ofc_args.n_peaks).to(device)  # analitical function
-        if loader.dataset.zero_mean:
-            forward_outputs = forward_outputs - torch.mean(forward_outputs, dim=-1, keepdim=True)
-        forward_outputs = loader.dataset.normalize(forward_outputs)
+        with context:
 
-        # Calculate loss
+            inverse_outputs = inverse_model(targets)  # Forward pass through the inverse model
+            forward_outputs = diff_ofc_gen(inverse_outputs.to('cpu'), ofc_args.t, ofc_args.Rs, ofc_args.Vpi, ofc_args.NFFT, ofc_args.Fa, ofc_args.SpS, ofc_args.n_peaks).to(device)  # analitical function
+            if loader.dataset.zero_mean:
+                forward_outputs = forward_outputs - torch.mean(forward_outputs, dim=-1, keepdim=True)
+            forward_outputs = loader.dataset.normalize(forward_outputs)
 
-        loss = loss_fn(forward_outputs, targets)
-        total_loss += loss.item()
+            loss = loss_fn(forward_outputs, targets) # Calculate loss
+
 
         if mode == 'train':
-            optimizer.zero_grad()  # Reset gradients tensors
-            loss.backward()  # Calculate gradients
-            if gradient_clipping:
-                torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
-            optimizer.step()  # Update weights
-
+            optimizer.zero_grad() # Reset gradients tensors
+            if scaler is not None and use_autocast:
+                scaler.scale(loss).backward()
+                if use_gradient_clipping:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward() # Calculate gradients
+                if use_gradient_clipping:
+                    torch.nn.utils.clip_grad_norm_(inverse_model.parameters(), max_norm=1.0)
+                optimizer.step() # Update weights
+        
+        total_loss += loss.item()
         n_loops += 1
 
     avg_loss = total_loss / n_loops
@@ -475,7 +537,7 @@ class FrequencyCombNet(nn.Module):
         Dropout rate (0.0 means no dropout)
     """
     
-    def __init__(self, architecture, activation='relu', use_batchnorm=False, dropout_rate=0.0):
+    def __init__(self, architecture, activation='relu', use_batchnorm=False, dropout_rate=0.0, init_weights=False):
         super(FrequencyCombNet, self).__init__()
         self.architecture = architecture
         self.activation = activation
@@ -501,7 +563,8 @@ class FrequencyCombNet(nn.Module):
         self.layers = nn.Sequential(*layers)
         
         # Initialize weights
-        self._initialize_weights()
+        if init_weights:
+            self._initialize_weights()
 
     def _get_activation(self):
         if self.activation == 'relu':
