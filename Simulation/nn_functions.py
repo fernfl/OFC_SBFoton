@@ -240,7 +240,7 @@ def plot_comparison_style(target, output, freqs_GHz, loss, figname, title, ylim 
 
 
 
-def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss._Loss, device: str = "cpu", optimizer: torch.optim.Optimizer = None, use_gradient_clipping: bool = False, use_autocast: bool = False, scaler: GradScaler = None) -> tuple:
+def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.loss._Loss, device: str = "cpu", optimizer: torch.optim.Optimizer = None, use_gradient_clipping: bool = False, use_autocast: bool = False, use_scaler: bool = False) -> tuple:
     '''
     Function to run one epoch of the forward model
 
@@ -283,11 +283,13 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
     total_loss = 0.0
     n_loops = 0
 
+    scaler = torch.amp.GradScaler()
+
     for inputs, targets in loader:
         inputs, targets = inputs.to(device), targets.to(device)
 
         if use_autocast:
-            context = autocast()
+            context = autocast(device_type=device)
         else:
             context = nullcontext()
 
@@ -297,7 +299,7 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
 
         if mode == 'train':
             optimizer.zero_grad()
-            if scaler is not None and use_autocast:
+            if use_scaler and use_autocast:
                 scaler.scale(loss).backward()
                 if use_gradient_clipping:
                     scaler.unscale_(optimizer)
@@ -316,7 +318,7 @@ def run_one_epoch_forward(mode: str, loader, model, loss_fn: torch.nn.modules.lo
     avg_loss = total_loss / n_loops
     return avg_loss, outputs, targets
 
-def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, use_gradient_clipping: bool = False, use_autocast: bool = False, scaler: GradScaler = None) -> tuple:
+def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, use_gradient_clipping: bool = False, use_autocast: bool = False, use_scaler: bool = False) -> tuple:
 
     '''
     Function to run one epoch of the inverse model
@@ -365,10 +367,13 @@ def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_
 
     total_loss = 0.0
     n_loops = 0
+
+    scaler = torch.amp.GradScaler()
+
     for inputs, targets in loader:
 
         if use_autocast:
-            context = autocast()
+            context = autocast(device_type=device)
         else:
             context = nullcontext()
 
@@ -379,7 +384,7 @@ def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_
 
         if mode == 'train':
             optimizer.zero_grad() # Reset gradients tensors
-            if scaler is not None and use_autocast:
+            if use_scaler and use_autocast:
                 scaler.scale(loss).backward()
                 if use_gradient_clipping:
                     scaler.unscale_(optimizer)
@@ -399,7 +404,7 @@ def run_one_epoch_inverse(mode: str, loader, forward_model, inverse_model, loss_
     return avg_loss, forward_outputs, inverse_outputs, targets, inputs
 
 
-def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, use_gradient_clipping: bool = False, use_autocast: bool = False, scaler: GradScaler = None) -> tuple:
+def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inverse_model, loss_fn: torch.nn.modules.loss, device: str = "cpu", optimizer: torch.optim = None, use_gradient_clipping: bool = False, use_autocast: bool = False, use_scaler: bool = False) -> tuple:
 
     '''
     Function to run one epoch of the inverse model with a Differentiable OFC Generator instead of the forward model
@@ -450,11 +455,13 @@ def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inv
 
     total_loss = 0.0
     n_loops = 0
-    
+
+    scaler = torch.amp.GradScaler()
+
     for inputs, targets in loader:
 
         if use_autocast:
-            context = autocast()
+            context = autocast(device_type=device)
         else:
             context = nullcontext()
 
@@ -471,7 +478,7 @@ def run_one_epoch_inverse_DiffGen(mode: str, loader, diff_ofc_gen, ofc_args, inv
 
         if mode == 'train':
             optimizer.zero_grad() # Reset gradients tensors
-            if scaler is not None and use_autocast:
+            if use_scaler and use_autocast:
                 scaler.scale(loss).backward()
                 if use_gradient_clipping:
                     scaler.unscale_(optimizer)
